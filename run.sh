@@ -27,4 +27,4 @@ if [[ ! -x "$PY" ]]; then
 fi
 
 # Run your app (change app.py → main.py if you renamed it)
-exec "$PY" app.py "$PROFILE"
+exec "$PY" main.py "$PROFILE"
