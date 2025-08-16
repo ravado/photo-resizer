@@ -16,7 +16,7 @@ PROFILE="$1"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 cd "$SCRIPT_DIR"
 
-VENV="$SCRIPT_DIR/venv"
+VENV="$SCRIPT_DIR/.venv"
 PY="$VENV/bin/python"
 
 # Bootstrap venv if missing (optional safety)
