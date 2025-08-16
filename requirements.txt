@@ -1,0 +1,7 @@
+# Other project dependencies  ^` 
+# Pillow
+# sqlite-utils
+# etc.
+
+# journald logging (Linux only)
+systemd-python; platform_system == "Linux"
