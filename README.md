@@ -36,7 +36,7 @@ photo-resizer/
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/photo-resizer.git
+   git clone https://github.com/ravado/photo-resizer.git
    cd photo-resizer
    ```
 
