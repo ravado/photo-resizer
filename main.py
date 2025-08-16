@@ -1,9 +1,9 @@
 from __future__ import annotations
 import argparse
-from config import LOCATIONS, BASE, EXTS, RESIZE_WIDTH, RESIZE_HEIGHT, IM_QUALITY, DB_PATH, TIMEOUT_SECS
-from planner import Planner
-from imaging import ImageEngine
-from converter import Converter
+from app.config import LOCATIONS, BASE, EXTS, RESIZE_WIDTH, RESIZE_HEIGHT, IM_QUALITY, DB_PATH, TIMEOUT_SECS
+from app.planner import Planner
+from app.imaging import ImageEngine
+from app.converter import Converter
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Convert (or skip by hash) + log to SQLite.")

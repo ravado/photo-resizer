@@ -15,4 +15,4 @@ TIMEOUT_SECS = 600
 IM_MODE = "convert"
 
 # Database
-DB_PATH = Path("/Volumes/Photo-Frames/photo_conversions.db")
+DB_PATH = Path("/Volumes/Photo-Frames/photo_conversions_mac.db")
