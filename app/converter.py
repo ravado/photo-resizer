@@ -2,7 +2,6 @@ from __future__ import annotations
 import time, shutil
 from pathlib import Path
 from decimal import Decimal, getcontext
-
 from app.config import RESIZE_WIDTH, RESIZE_HEIGHT, IM_MODE, EXTS
 from app.planner import Planner
 from app.imaging import ImageEngine
@@ -10,11 +9,18 @@ from app.database_operations import PhotoDB
 
 getcontext().prec = 28
 
+
 class Converter:
-    def __init__(self, planner: Planner, engine: ImageEngine, db_path: Path):
+    # def __init__(self, planner: Planner, engine: ImageEngine, db_path: Path):
+    #     self.planner = planner
+    #     self.engine = engine
+    #     self.db_path = db_path
+    def __init__(self, planner, engine, db_path, make_logger):
         self.planner = planner
         self.engine = engine
         self.db_path = db_path
+        # one child per class; add static context if useful
+        self.log: logging.Logger = make_logger("converter")
 
     @staticmethod
     def _log_db(db: PhotoDB, *, end_ts: float, status: str, filename: str, file_ext: str,
@@ -46,14 +52,14 @@ class Converter:
             src_hash = self.engine.sha256_file(full_path)
         except Exception:
             src_hash = None
+            self.log.debug("SHA256 computation failed for %s (continuing without hash)", full_path)
 
         # ALREADY_DONE
         if src_hash and db.already_done_here(src_hash, str(output_path)) and output_path.exists():
             end_ts = time.time()
             dur = int(round(end_ts * 1000)) - start_ms
             out_size = output_path.stat().st_size if output_path.exists() else None
-            print(f"[{time.strftime('%d-%m-%Y %H:%M:%S')}] #{idx} of {total}")
-            print(f"[{full_path.name}] ALREADY_DONE (hash match and file present in destination)\n")
+            self.log.info("#%d/%d %s: ALREADY_DONE (hash match and destination file exists)", idx, total, full_path.name)
             self._log_db(db, end_ts=end_ts, status="ALREADY_DONE", filename=full_path.name, file_ext=file_ext,
                          full_path=full_path, output_path=output_path, src_hash=src_hash,
                          orig_w=None, orig_h=None, new_w=None, new_h=None, out_size=out_size,
@@ -69,8 +75,7 @@ class Converter:
                     end_ts = time.time()
                     dur = int(round(end_ts * 1000)) - start_ms
                     out_size = output_path.stat().st_size if output_path.exists() else None
-                    print(f"[{time.strftime('%d-%m-%Y %H:%M:%S')}] #{idx} of {total}")
-                    print(f"[{full_path.name}] ALREADY_DONE (dedupe hit is this destination)\n")
+                    self.log.info("#%d/%d %s: ALREADY_DONE (dedupe hit is this destination)", idx, total, full_path.name)
                     self._log_db(db, end_ts=end_ts, status="ALREADY_DONE", filename=full_path.name, file_ext=file_ext,
                                  full_path=full_path, output_path=output_path, src_hash=src_hash,
                                  orig_w=None, orig_h=None, new_w=None, new_h=None, out_size=out_size,
@@ -86,8 +91,7 @@ class Converter:
 
                 end_ts = time.time()
                 dur = int(round(end_ts * 1000)) - start_ms
-                print(f"[{time.strftime('%d-%m-%Y %H:%M:%S')}] #{time.strftime('%d-%m-%Y %H:%M:%S')} #{idx} of {total}")
-                print(f"[{full_path.name}] SKIPPED (duplicate by hash). Copied from: {existing_dst}\n")
+                self.log.info("#%d/%d %s: SKIPPED_DUP (copied from existing: %s)", idx, total, full_path.name, existing_dst)
                 self._log_db(db, end_ts=end_ts, status="SKIPPED_DUP", filename=full_path.name, file_ext=file_ext,
                              full_path=full_path, output_path=output_path, src_hash=src_hash,
                              orig_w=None, orig_h=None, new_w=None, new_h=None, out_size=out_size,
@@ -95,8 +99,8 @@ class Converter:
                              src_size=src_size, src_mtime=src_mtime)
                 return int(time.time() - start_ts)
             except Exception as e:
-                print(f"WARNING: failed to copy existing conversion ({existing_dst}) -> {output_path}: {e}")
-                # continue to full convert
+                self.log.warning("Failed to copy existing conversion (%s) -> %s: %s", existing_dst, output_path, e)
+                # fall through to full convert
 
         # Normal convert
         filename = full_path.name
@@ -110,7 +114,7 @@ class Converter:
                          duration_ms=int(round(end_ts * 1000)) - start_ms,
                          im_args="-auto-orient", error=str(e),
                          src_size=src_size, src_mtime=src_mtime)
-            print(f"ERROR: Failed to auto-orient {full_path}: {e}")
+            self.log.error("Auto-orient failed for %s: %s", full_path, e)
             return int(time.time() - start_ts)
 
         try:
@@ -123,13 +127,14 @@ class Converter:
                          duration_ms=int(round(end_ts * 1000)) - start_ms,
                          im_args="-identify", error=str(e),
                          src_size=src_size, src_mtime=src_mtime)
-            try: auto_oriented_path.unlink(missing_ok=True)
-            except Exception: pass
-            print(f"ERROR: Failed to identify size for {auto_oriented_path}: {e}")
+            try:
+                auto_oriented_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            self.log.error("Identify size failed for %s: %s", auto_oriented_path, e)
             return int(time.time() - start_ts)
 
-        print(f"[{time.strftime('%d-%m-%Y %H:%M:%S')}] #{idx} of {total}")
-        print(f"[{filename}] of {orig_w}x{orig_h}")
+        self.log.info("#%d/%d %s: original size %dx%d", idx, total, filename, orig_w, orig_h)
 
         status = "SUCCESS"
         error_text = None
@@ -146,26 +151,30 @@ class Converter:
                 percent = scale * Decimal("100")
                 new_w = int((Decimal(orig_w) * scale).to_integral_value())
                 new_h = int((Decimal(orig_h) * scale).to_integral_value())
-                print(f"Resizing {full_path} to {resized_path}")
-                print(f"New dimensions: {new_w}x{new_h}")
+                self.log.info("Resizing %s → %s (new %dx%d, %s%%)", full_path, resized_path, new_w, new_h, percent)
                 im_args_used = self.engine.resize_percent(auto_oriented_path, resized_path, percent)
-                if output_path.exists(): output_path.unlink()
+                if output_path.exists():
+                    output_path.unlink()
                 shutil.move(str(resized_path), str(output_path))
-                print(f"Cleaned redundant file {resized_path}")
-                print("Resized")
+                self.log.debug("Removed temp resized file %s after move", resized_path)
+                self.log.info("Resized → %s", output_path)
             else:
-                print(f"Copying {full_path} without resizing")
+                self.log.info("Copying without resize: %s → %s", full_path, output_path)
                 shutil.copy2(auto_oriented_path, resized_path)
-                if output_path.exists(): output_path.unlink()
+                if output_path.exists():
+                    output_path.unlink()
                 shutil.move(str(resized_path), str(output_path))
                 new_w, new_h = orig_w, orig_h
                 im_args_used = "(copy without resize)"
         except Exception as e:
             status = "FAILED"
             error_text = str(e)
+            self.log.error("Conversion failed for %s: %s", full_path, e)
         finally:
-            try: auto_oriented_path.unlink(missing_ok=True)
-            except Exception: pass
+            try:
+                auto_oriented_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
         if output_path.exists():
             out_size = output_path.stat().st_size
@@ -182,18 +191,18 @@ class Converter:
                      src_size=src_size, src_mtime=src_mtime)
 
         if elapsed >= 60:
-            m, s = divmod(elapsed, 60); print(f"Elapsed time: {m}m {s}s")
+            m, s = divmod(elapsed, 60)
+            self.log.info("Elapsed: %dm %ds", m, s)
         else:
-            print(f"Elapsed time: {elapsed}s")
-        print()
+            self.log.info("Elapsed: %ds", elapsed)
+
         return elapsed
-    
-    def cleanup_temp_files(self, watch_dir: pathlib.Path):
+
+    def cleanup_temp_files(self, watch_dir: Path):
         # scan all subfolders
         for pattern in ("*_auto_oriented.*", "*_resized.*"):
             for f in watch_dir.rglob(pattern):
                 name = f.name
-                # derive the base *stem* before the temp marker
                 if "_auto_oriented" in name:
                     base_stem = name.replace("_auto_oriented", "").rsplit(".", 1)[0]
                 elif "_resized" in name:
@@ -201,24 +210,24 @@ class Converter:
                 else:
                     continue
 
-                # look for any plausible original with the same stem
                 has_original = any((f.parent / f"{base_stem}{ext}").exists() for ext in EXTS)
                 if not has_original:
                     try:
-                        print(f"🧹 Removing leftover {f}")
+                        self.log.info("Removing leftover temp file: %s", f)
                         f.unlink()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self.log.debug("Failed to remove %s: %s", f, e)
 
     def run(self, location_key: str):
         watch_dir, out_dir = self.planner.dirs_for_location(location_key)
-        print(f"[{time.strftime('%d-%m-%Y %H:%M:%S')}] Initializing resizing script...\n")
+        self.log.info("Initializing resizing run for location '%s'...", location_key)
 
         # Clean up before doing anything
         self.cleanup_temp_files(watch_dir)
 
         candidates = self.planner.list_candidates(watch_dir)
         total = len(candidates)
+        self.log.info("Found %d candidate(s) in %s", total, watch_dir)
 
         total_elapsed = 0
         with PhotoDB(self.db_path) as db:
@@ -229,8 +238,9 @@ class Converter:
         # final logs
         if total_elapsed >= 3600:
             h, rem = divmod(total_elapsed, 3600); m, s = divmod(rem, 60)
-            print(f"Total time: {h}h {m}m {s}s")
+            self.log.info("Total time: %dh %dm %ds", h, m, s)
         elif total_elapsed >= 60:
-            m, s = divmod(total_elapsed, 60); print(f"Total time: {m}m {s}s")
+            m, s = divmod(total_elapsed, 60)
+            self.log.info("Total time: %dm %ds", m, s)
         else:
-            print(f"Total time: {total_elapsed}s")
+            self.log.info("Total time: %ds", total_elapsed)
