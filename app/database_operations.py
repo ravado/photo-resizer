@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS conversions (
   im_args TEXT,
   error TEXT,
   src_size INTEGER,
-  src_mtime INTEGER
+  src_mtime INTEGER,
+  saved_percent INTEGER,                   -- e.g. 90 (means 90% saved)
+  saved_mb REAL                            -- e.g. 9.25 (MB saved)
 );
 CREATE INDEX IF NOT EXISTS idx_conversions_src_hash ON conversions(src_hash);
 CREATE INDEX IF NOT EXISTS idx_conversions_src_path ON conversions(src_fullpath);
@@ -37,8 +39,9 @@ _INSERT_SQL = """
 INSERT INTO conversions (
   converted_at, status, src_name, src_ext, src_fullpath, dst_fullpath,
   src_hash, orig_width, orig_height, new_width, new_height, out_size_bytes,
-  duration_ms, im_mode, im_args, error, src_size, src_mtime
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  duration_ms, im_mode, im_args, error, src_size, src_mtime,
+  saved_percent, saved_mb
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 _SELECT_EXISTING = """
@@ -96,10 +99,19 @@ class PhotoDB:
                orig_width: int | None, orig_height: int | None, new_width: int | None, new_height: int | None,
                out_size_bytes: int | None, duration_ms: int, im_mode: str, im_args: str, error: str | None,
                src_size: int | None = None, src_mtime: int | None = None, commit: bool = True) -> None:
+        # compute savings
+        saved_percent = None
+        saved_mb = None
+        if src_size and out_size_bytes:
+            if src_size > 0:
+                saved_percent = int(round((src_size - out_size_bytes) / src_size * 100))
+            saved_mb = round((src_size - out_size_bytes) / (1024 * 1024), 2)
+
         self.conn.execute(_INSERT_SQL, (
             converted_at, status, src_name, src_ext, src_fullpath, dst_fullpath,
             src_hash, orig_width, orig_height, new_width, new_height, out_size_bytes,
-            duration_ms, im_mode, im_args, error, src_size, src_mtime
+            duration_ms, im_mode, im_args, error, src_size, src_mtime,
+            saved_percent, saved_mb
         ))
         if commit:
             self.conn.commit()
