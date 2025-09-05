@@ -3,8 +3,8 @@ from pathlib import Path
 
 # Locations + base path
 LOCATIONS = {"home": "Home", "batanovs": "Batanovs", "cherednychoks": "Cherednychoks"}
-# BASE = Path("/mnt/photo-frame")  # tip for mac: Path.home() / "photo-frame"
-BASE = Path("/Volumes/Photo-Frames")  # tip for mac: Path.home() / "photo-frame"
+BASE = Path("/mnt/photo-frame")  # tip for mac: Path.home() / "photo-frame"
+# BASE = Path("/Volumes/Photo-Frames")  # tip for mac: Path.home() / "photo-frame"
 
 # Formats / sizes
 EXTS = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff"}
@@ -15,4 +15,4 @@ TIMEOUT_SECS = 600
 IM_MODE = "convert"
 
 # Database
-DB_PATH = Path("/Volumes/Photo-Frames/photo_conversions_mac.db")
+DB_PATH = Path("/mnt/photo-frame/photo_conversions.db")
