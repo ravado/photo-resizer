@@ -215,7 +215,11 @@
                 status_live: "LIVE",
                 auto_refresh: "Auto-refresh active",
                 loading: "Loading data...",
-                no_records: "No records found."
+                no_records: "No records found.",
+                retry_btn: "Retry",
+                retry_confirm: "Retrying conversion...",
+                retry_success: "Conversion successful!",
+                retry_failed: "Retry failed"
             },
             uk: {
                 title: "Фото Ресайзер",
@@ -240,7 +244,11 @@
                 status_live: "ОНЛАЙН",
                 auto_refresh: "Автооновлення активне",
                 loading: "Завантаження даних...",
-                no_records: "Записів не знайдено."
+                no_records: "Записів не знайдено.",
+                retry_btn: "Повторити",
+                retry_confirm: "Повторна конвертація...",
+                retry_success: "Конвертація успішна!",
+                retry_failed: "Помилка повторної конвертації"
             }
         };
 
@@ -340,6 +348,55 @@
             updateDashboard();
         }
 
+        async function retryConversion(filePath, buttonEl) {
+            // Disable button and show loading
+            buttonEl.disabled = true;
+            buttonEl.innerHTML = '⏳';
+
+            try {
+                const response = await fetch('/api/retry', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_path: filePath })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Show success briefly
+                    buttonEl.innerHTML = '✅';
+                    buttonEl.classList.add('text-green-500');
+
+                    // Refresh dashboard after short delay
+                    setTimeout(() => {
+                        updateDashboard();
+                    }, 1000);
+                } else {
+                    // Show error
+                    buttonEl.innerHTML = '❌';
+                    buttonEl.classList.add('text-red-500');
+                    alert(i18n[currentLang].retry_failed + ': ' + result.message);
+
+                    // Reset button after delay
+                    setTimeout(() => {
+                        buttonEl.innerHTML = '🔄';
+                        buttonEl.classList.remove('text-red-500');
+                        buttonEl.disabled = false;
+                    }, 2000);
+                }
+            } catch (error) {
+                console.error('Retry error:', error);
+                buttonEl.innerHTML = '❌';
+                alert(i18n[currentLang].retry_failed + ': ' + error.message);
+
+                // Reset button
+                setTimeout(() => {
+                    buttonEl.innerHTML = '🔄';
+                    buttonEl.disabled = false;
+                }, 2000);
+            }
+        }
+
         async function updateDashboard() {
             try {
                 // Construct URL
@@ -392,9 +449,19 @@
                                 ${row.saved_mb > 0 ? '-' + row.saved_mb + ' MB' : ''}
                             </td>
                             <td class="px-6 py-4">
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}">
-                                    ${row.status}
-                                </span>
+                                <div class="flex items-center space-x-2">
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}">
+                                        ${row.status}
+                                    </span>
+                                    ${row.status === 'FAILED' && row.src_fullpath ? `
+                                        <button 
+                                            onclick="retryConversion('${row.src_fullpath.replace(/'/g, "\\'")}'}, this)"
+                                            class="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition"
+                                            title="${i18n[currentLang].retry_btn}">
+                                            🔄
+                                        </button>
+                                    ` : ''}
+                                </div>
                             </td>
                         `;
                         tbody.appendChild(tr);

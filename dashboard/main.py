@@ -122,7 +122,7 @@ def get_history(limit: int = 50, location: Optional[str] = None, only_failures: 
 
     query = f"""
     SELECT converted_at, src_name, orig_width, orig_height, new_width, new_height, 
-           status, saved_mb, duration_ms, error 
+           status, saved_mb, duration_ms, error, src_fullpath 
     FROM conversions 
     WHERE {where_sql}
     ORDER BY converted_at DESC 
@@ -144,7 +144,8 @@ def get_history(limit: int = 50, location: Optional[str] = None, only_failures: 
                 "status": row[6],
                 "saved_mb": row[7] if row[7] else 0.0,
                 "duration_ms": row[8],
-                "error": row[9]
+                "error": row[9],
+                "src_fullpath": row[10]
             })
     return history
 
@@ -169,3 +170,82 @@ async def api_data(loc: str = None, failures: bool = False):
         "stats": get_stats(location=location),
         "history": get_history(location=location, only_failures=failures)
     }
+
+@app.post("/api/retry")
+async def retry_conversion(request: Request):
+    """
+    Retry a failed conversion.
+    Expects JSON: {"file_path": "/full/path/to/image.jpg"}
+    """
+    import time
+    from app.config import BASE, EXTS, RESIZE_WIDTH, RESIZE_HEIGHT, IM_QUALITY, TIMEOUT_SECS
+    from app.planner import Planner
+    from app.imaging import ImageEngine
+    from app.converter import Converter
+    from app.logging_setup import configure_logging
+    
+    try:
+        body = await request.json()
+        file_path_str = body.get("file_path")
+        
+        if not file_path_str:
+            return {"success": False, "message": "Missing file_path parameter"}
+        
+        file_path = Path(file_path_str)
+        
+        # Validation
+        if not file_path.exists():
+            return {"success": False, "message": f"File not found: {file_path_str}"}
+        
+        if file_path.suffix.lower() not in EXTS:
+            return {"success": False, "message": f"Invalid file type: {file_path.suffix}"}
+        
+        # Determine location from path
+        location_key = None
+        for key, name in LOCATIONS.items():
+            if f"/{name}/" in str(file_path):
+                location_key = key
+                break
+        
+        if not location_key:
+            return {"success": False, "message": "Could not determine location from path"}
+        
+        # Setup converter (same as main.py)
+        make_logger = configure_logging(
+            level="INFO",
+            service_name="photo-resizer-retry",
+            to_stderr=False,
+            to_journal=False,
+        )
+        
+        planner = Planner(BASE, LOCATIONS, EXTS)
+        engine = ImageEngine(timeout=TIMEOUT_SECS, quality=IM_QUALITY)
+        converter = Converter(planner, engine, DB_PATH, make_logger=make_logger)
+        
+        # Get paths
+        watch_dir = planner.watch_dir(location_key)
+        out_dir = planner.output_dir(location_key)
+        
+        # Open DB for writing
+        with PhotoDB(DB_PATH, read_only=False) as db:
+            # Run conversion
+            duration = converter.process_one(
+                db=db,
+                idx=1,
+                total=1,
+                full_path=file_path,
+                watch_dir=watch_dir,
+                out_dir=out_dir
+            )
+        
+        return {
+            "success": True,
+            "message": f"Conversion completed in {duration}s",
+            "duration": duration
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Retry failed: {str(e)}"
+        }
