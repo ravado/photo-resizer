@@ -9,6 +9,17 @@ from typing import List, Dict, Any
 from app.config import DB_PATH
 from app.database_operations import PhotoDB
 
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse
+from pathlib import Path
+import sqlite3
+from typing import List, Dict, Any, Optional
+
+from app.config import DB_PATH, LOCATIONS
+from app.database_operations import PhotoDB
+
 app = FastAPI(title="Photo Resizer Dashboard", docs_url=None, redoc_url=None)
 
 # Setup Templates
@@ -16,58 +27,114 @@ BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-def get_stats() -> Dict[str, Any]:
-    """Fetch aggregate statistics from the database."""
+def get_locations_config() -> Dict[str, str]:
+    """Return available locations from config."""
+    return LOCATIONS
+
+def get_stats(location: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch aggregate statistics, optionally filtered by location."""
     stats = {
         "total_files": 0,
         "total_saved_mb": 0.0,
         "success_rate": 0.0,
+        "compression_ratio": 0.0,
         "last_run": "Never"
     }
     
     with PhotoDB(DB_PATH, read_only=True) as db:
         if not db.conn:
             return stats
+        
+        # Base query parts
+        where_clauses = ["status='SUCCESS'"]
+        params = []
+        
+        if location and location in LOCATIONS:
+            # Filter by path containing the folder name
+            folder_name = LOCATIONS[location]
+            where_clauses.append("src_fullpath LIKE ?")
+            params.append(f"%/{folder_name}/%")
+
+        where_sql = " AND ".join(where_clauses)
+        
+        # 1. Counts and Size Savings
+        query = f"""
+            SELECT COUNT(*), SUM(saved_mb), SUM(src_size), SUM(out_size_bytes) 
+            FROM conversions 
+            WHERE {where_sql}
+        """
+        cur = db.conn.execute(query, params)
+        row = cur.fetchone()
+        
+        if row:
+            stats["total_files"] = row[0]
+            stats["total_saved_mb"] = round(row[1], 2) if row[1] else 0.0
+            total_src = row[2] or 0
+            total_out = row[3] or 0
             
-        # Total converted (SUCCESS)
-        cur = db.conn.execute("SELECT COUNT(*) FROM conversions WHERE status='SUCCESS'")
-        stats["total_files"] = cur.fetchone()[0]
+            # Compression Ratio: e.g. 5.0 means original was 5x larger
+            if total_out > 0:
+                stats["compression_ratio"] = round(total_src / total_out, 1)
+            else:
+                 stats["compression_ratio"] = 0.0
+
+        # 2. Success Rate (Last 100 relevant to filter)
+        # We need a fresh where clause without status='SUCCESS' for the rate
+        rate_where = ["1=1"]
+        rate_params = []
+        if location and location in LOCATIONS:
+            folder_name = LOCATIONS[location]
+            rate_where.append("src_fullpath LIKE ?")
+            rate_params.append(f"%/{folder_name}/%")
+            
+        rate_sql = " AND ".join(rate_where)
         
-        # Total saved MB
-        cur = db.conn.execute("SELECT SUM(saved_mb) FROM conversions WHERE status='SUCCESS'")
-        saved = cur.fetchone()[0]
-        stats["total_saved_mb"] = round(saved, 2) if saved else 0.0
-        
-        # Success Rate (last 100 attempts to be relevant)
-        cur = db.conn.execute("SELECT status FROM conversions ORDER BY converted_at DESC LIMIT 100")
+        query_rate = f"SELECT status FROM conversions WHERE {rate_sql} ORDER BY converted_at DESC LIMIT 100"
+        cur = db.conn.execute(query_rate, rate_params)
         rows = cur.fetchall()
         if rows:
             successes = sum(1 for r in rows if r[0] == 'SUCCESS')
             stats["success_rate"] = round((successes / len(rows)) * 100, 1)
-            
-        # Last Run
-        cur = db.conn.execute("SELECT converted_at FROM conversions ORDER BY converted_at DESC LIMIT 1")
+
+        # 3. Last Run
+        query_last = f"SELECT converted_at FROM conversions WHERE {rate_sql} ORDER BY converted_at DESC LIMIT 1"
+        cur = db.conn.execute(query_last, rate_params)
         row = cur.fetchone()
         if row:
-            # Simple timestamp (can be formatted in JS)
-            stats["last_run"] = row[0] 
+            stats["last_run"] = row[0]
 
     return stats
 
-def get_history(limit: int = 50) -> List[Dict[str, Any]]:
-    """Fetch recent conversion history."""
-    query = """
+def get_history(limit: int = 50, location: Optional[str] = None, only_failures: bool = False) -> List[Dict[str, Any]]:
+    """Fetch recent conversion history with filtering."""
+    where_clauses = ["1=1"]
+    params = []
+
+    if location and location in LOCATIONS:
+        folder_name = LOCATIONS[location]
+        where_clauses.append("src_fullpath LIKE ?")
+        params.append(f"%/{folder_name}/%")
+
+    if only_failures:
+        where_clauses.append("status != 'SUCCESS' AND status != 'SKIPPED_DUP'")
+
+    where_sql = " AND ".join(where_clauses)
+
+    query = f"""
     SELECT converted_at, src_name, orig_width, orig_height, new_width, new_height, 
-           status, saved_mb, duration_ms 
+           status, saved_mb, duration_ms, error 
     FROM conversions 
+    WHERE {where_sql}
     ORDER BY converted_at DESC 
     LIMIT ?
     """
+    params.append(limit)
+
     history = []
     with PhotoDB(DB_PATH, read_only=True) as db:
         if not db.conn:
             return []
-        cur = db.conn.execute(query, (limit,))
+        cur = db.conn.execute(query, params)
         for row in cur.fetchall():
             history.append({
                 "timestamp": row[0],
@@ -76,17 +143,29 @@ def get_history(limit: int = 50) -> List[Dict[str, Any]]:
                 "new_size": f"{row[4]}x{row[5]}" if row[4] else "?",
                 "status": row[6],
                 "saved_mb": row[7] if row[7] else 0.0,
-                "duration_ms": row[8]
+                "duration_ms": row[8],
+                "error": row[9]
             })
     return history
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index.html", {
+        "request": request, 
+        "locations": LOCATIONS
+    })
 
 @app.get("/api/data")
-async def api_data():
+async def api_data(loc: str = None, failures: bool = False):
+    """
+    API Query Params:
+    - loc: Location slug (e.g., 'home')
+    - failures: 'true' to show only failures/issues
+    """
+    # Convert 'null' or empty string to None
+    location = loc if loc and loc != "null" else None
+    
     return {
-        "stats": get_stats(),
-        "history": get_history()
+        "stats": get_stats(location=location),
+        "history": get_history(location=location, only_failures=failures)
     }
