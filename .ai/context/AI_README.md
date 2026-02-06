@@ -28,3 +28,6 @@ When analyzing or modifying this codebase, consider the following context which 
 - **Location**: `.ai/plans/`
 - **Convention**: Store implementation plans here before execution. Use the naming convention `YYYY-MM-DD-feature-name.md`.
 - **Requirement**: Every plan in planning mode MUST be saved into an actual file when approved.
+
+## Version Control
+- **Commit Approval**: All commits must be manually approved by the user before execution. Do not use auto-commit or bulk commit features without explicit confirmation.
