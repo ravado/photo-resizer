@@ -1,7 +1,13 @@
-# Other project dependencies  ^` 
+# Other project dependencies
 # Pillow
 # sqlite-utils
 # etc.
 
 # journald logging (Linux only)
 systemd-python; platform_system == "Linux"
+
+# Dashboard
+fastapi
+uvicorn
+jinja2
+python-multipart

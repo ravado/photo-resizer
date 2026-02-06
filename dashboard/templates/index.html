@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Resizer Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        gray: {
+                            900: '#1a202c',
+                            800: '#2d3748',
+                            700: '#4a5568',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom scrollbar for table */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #2d3748; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4a5568; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #718096; 
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 transition-colors duration-200 min-h-screen font-sans">
+    <div class="container mx-auto px-4 py-8">
+        
+        <!-- Header -->
+        <header class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-teal-400">
+                    Photo Resizer
+                </h1>
+                <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Conversion Metrics & History</p>
+            </div>
+            <div class="flex items-center space-x-4">
+                 <div id="connection-status" class="flex items-center text-xs font-mono text-green-500">
+                    <span class="relative flex h-3 w-3 mr-2">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                    </span>
+                    <span id="status-text">LIVE</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <!-- Total Processed -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
+                <h3 class="text-gray-500 dark:text-gray-400 text-sm uppercase font-semibold tracking-wider">Total Processed</h3>
+                <div class="mt-2 text-4xl font-bold" id="stat-total">0</div>
+                <div class="mt-1 text-sm text-gray-500 dark:text-gray-400">Images resized</div>
+            </div>
+
+            <!-- Space Saved -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border-l-4 border-teal-500">
+                <h3 class="text-gray-500 dark:text-gray-400 text-sm uppercase font-semibold tracking-wider">Space Saved</h3>
+                <div class="mt-2 text-4xl font-bold" id="stat-saved">0 <span class="text-lg text-gray-400">MB</span></div>
+                <div class="mt-1 text-sm text-gray-500 dark:text-gray-400">Storage optimized</div>
+            </div>
+
+            <!-- Success Rate -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border-l-4 border-purple-500">
+                <h3 class="text-gray-500 dark:text-gray-400 text-sm uppercase font-semibold tracking-wider">Success Rate</h3>
+                <div class="mt-2 text-4xl font-bold" id="stat-rate">0%</div>
+                <div class="mt-1 text-sm text-gray-500 dark:text-gray-400">Last 100 operations</div>
+            </div>
+        </div>
+
+        <!-- History Table -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex justify-between items-center">
+                <h2 class="text-lg font-semibold">Recent Conversions</h2>
+                <span class="text-xs text-gray-500">Auto-refreshing every 10s</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs uppercase tracking-wider">
+                            <th class="px-6 py-3 font-medium">Time</th>
+                            <th class="px-6 py-3 font-medium">File</th>
+                            <th class="px-6 py-3 font-medium">Resolution</th>
+                            <th class="px-6 py-3 font-medium">Saved</th>
+                            <th class="px-6 py-3 font-medium">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-body" class="text-sm divide-y divide-gray-200 dark:divide-gray-700">
+                        <!-- Rows injected via JS -->
+                        <tr>
+                            <td colspan="5" class="px-6 py-4 text-center text-gray-500">Loading data...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript for Data Fetching -->
+    <script>
+        function formatBytes(mb) {
+            if (mb > 1024) {
+                return (mb / 1024).toFixed(2) + ' GB';
+            }
+            return mb.toFixed(1) + ' MB';
+        }
+
+        function formatDate(ts) {
+            // ts is unix timestamp in seconds (int) or milliseconds? 
+            // DB schema says "converted_at INTEGER". Usually seconds in Python time.time()? 
+            // Let's assume seconds.
+            const date = new Date(ts * 1000);
+            return date.toLocaleString();
+        }
+
+        function getStatusColor(status) {
+            if (status === 'SUCCESS') return 'text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30';
+            if (status === 'FAILED') return 'text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30';
+            if (status.includes('SKIPPED')) return 'text-yellow-600 dark:text-yellow-400 bg-yellow-100 dark:bg-yellow-900/30';
+            return 'text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-900/30';
+        }
+
+        async function updateDashboard() {
+            try {
+                const response = await fetch('/api/data');
+                const data = await response.json();
+
+                // Update Stats
+                document.getElementById('stat-total').innerText = data.stats.total_files.toLocaleString();
+                document.getElementById('stat-saved').innerHTML = `${data.stats.total_saved_mb.toLocaleString()} <span class="text-lg text-gray-400">MB</span>`;
+                document.getElementById('stat-rate').innerText = data.stats.success_rate + '%';
+                
+                // Update History
+                const tbody = document.getElementById('history-body');
+                tbody.innerHTML = '';
+
+                data.history.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors";
+                    
+                    const statusClass = getStatusColor(row.status);
+                    
+                    tr.innerHTML = `
+                        <td class="px-6 py-4 text-gray-500 dark:text-gray-400 whitespace-nowrap">${formatDate(row.timestamp)}</td>
+                        <td class="px-6 py-4 font-medium truncate max-w-xs" title="${row.filename}">${row.filename}</td>
+                        <td class="px-6 py-4 text-gray-500 dark:text-gray-400 text-xs">
+                            ${row.original_size} &rarr; ${row.new_size}
+                        </td>
+                        <td class="px-6 py-4 text-gray-500 dark:text-gray-400 font-mono">
+                            ${row.saved_mb > 0 ? '-' + row.saved_mb + ' MB' : '0 MB'}
+                        </td>
+                        <td class="px-6 py-4">
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}">
+                                ${row.status}
+                            </span>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                // Status Indicator
+                document.getElementById('status-text').innerText = "LIVE";
+                document.getElementById('connection-status').className = "flex items-center text-xs font-mono text-green-500";
+            
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                document.getElementById('status-text').innerText = "ERROR";
+                document.getElementById('connection-status').className = "flex items-center text-xs font-mono text-red-500";
+            }
+        }
+
+        // Initial load
+        updateDashboard();
+        // Refresh every 10 seconds
+        setInterval(updateDashboard, 10000);
+    </script>
+</body>
+</html>

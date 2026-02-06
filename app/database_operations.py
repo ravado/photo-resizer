@@ -54,8 +54,9 @@ LIMIT 10
 """
 
 class PhotoDB:
-    def __init__(self, db_path: Path | str):
+    def __init__(self, db_path: Path | str, read_only: bool = False):
         self.path = Path(db_path)
+        self.read_only = read_only
         self.conn: Optional[sqlite3.Connection] = None
 
     def __enter__(self) -> "PhotoDB":
@@ -68,15 +69,24 @@ class PhotoDB:
     def open(self) -> None:
         if self.conn:
             return
-        self.conn = sqlite3.connect(str(self.path))
-        self.conn.execute("PRAGMA journal_mode=WAL;")
-        self.conn.execute("PRAGMA synchronous=NORMAL;")
-        self.conn.executescript(_SCHEMA)
         
-        # Migration: ensure last_checked_at column exists
-        self._ensure_columns()
+        if self.read_only:
+            # Open in read-only mode using URI syntax
+            # file:/path/to/db?mode=ro
+            uri = f"file:{self.path}?mode=ro"
+            self.conn = sqlite3.connect(uri, uri=True)
+            # In RO mode, we skip schema setup and migration
+        else:
+            self.conn = sqlite3.connect(str(self.path))
+            self.conn.execute("PRAGMA journal_mode=WAL;")
+            self.conn.execute("PRAGMA synchronous=NORMAL;")
+            self.conn.executescript(_SCHEMA)
+            
+            # Migration: ensure last_checked_at column exists
+            self._ensure_columns()
         
-        self.conn.commit()
+        if not self.read_only:
+            self.conn.commit()
 
     def _ensure_columns(self):
         """Check if last_checked_at exists, invoke ALTER TABLE if not."""

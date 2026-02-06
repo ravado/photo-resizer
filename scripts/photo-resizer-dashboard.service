@@ -1,0 +1,13 @@
+[Unit]
+Description=Photo Resizer Dashboard
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/scripts/start_dashboard.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
