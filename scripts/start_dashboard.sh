@@ -1,17 +1,26 @@
 #!/bin/bash
 
-# Ensure we are in the project root
-cd "$(dirname "$0")/.."
+# Resolve absolute path of project root
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
-# Activate virtual environment
-if [ -d ".venv" ]; then
-    source .venv/bin/activate
-elif [ -d "venv" ]; then
-    source venv/bin/activate
+# Log startup info
+echo "Starting Dashboard from $PROJECT_ROOT"
+echo "Current user: $(whoami)"
+
+# Find Python interpreter
+if [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
+    PYTHON="$PROJECT_ROOT/.venv/bin/python"
+elif [ -f "$PROJECT_ROOT/venv/bin/python" ]; then
+    PYTHON="$PROJECT_ROOT/venv/bin/python"
 else
-    echo "Virtual environment not found. Please create one first."
-    exit 1
+    echo "ERROR: Python interpreter not found in .venv or venv."
+    echo "Contents of $PROJECT_ROOT/:"
+    ls -la "$PROJECT_ROOT/"
+    exit 127
 fi
 
-# Run Dashboard (Port 80 requires root/sudo)
-exec uvicorn dashboard.main:app --host 0.0.0.0 --port 80
+echo "Using Python: $PYTHON"
+
+# Run Dashboard (Port 80 requires root, which this script should be running as)
+exec "$PYTHON" -m uvicorn dashboard.main:app --host 0.0.0.0 --port 80
