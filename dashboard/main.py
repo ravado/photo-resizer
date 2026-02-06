@@ -222,9 +222,8 @@ async def retry_conversion(request: Request):
         engine = ImageEngine(timeout=TIMEOUT_SECS, quality=IM_QUALITY)
         converter = Converter(planner, engine, DB_PATH, make_logger=make_logger)
         
-        # Get paths
-        watch_dir = planner.watch_dir(location_key)
-        out_dir = planner.output_dir(location_key)
+        # Get paths using dirs_for_location
+        watch_dir, out_dir = planner.dirs_for_location(location_key)
         
         # Open DB for writing
         with PhotoDB(DB_PATH, read_only=False) as db:
