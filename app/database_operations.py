@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS conversions (
   src_size INTEGER,
   src_mtime INTEGER,
   saved_percent INTEGER,                   -- e.g. 90 (means 90% saved)
-  saved_mb REAL                            -- e.g. 9.25 (MB saved)
+  saved_mb REAL,                           -- e.g. 9.25 (MB saved)
+  last_checked_at INTEGER                  -- Timestamp of last verification
 );
 CREATE INDEX IF NOT EXISTS idx_conversions_src_hash ON conversions(src_hash);
 CREATE INDEX IF NOT EXISTS idx_conversions_src_path ON conversions(src_fullpath);
@@ -71,7 +72,21 @@ class PhotoDB:
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.execute("PRAGMA synchronous=NORMAL;")
         self.conn.executescript(_SCHEMA)
+        
+        # Migration: ensure last_checked_at column exists
+        self._ensure_columns()
+        
         self.conn.commit()
+
+    def _ensure_columns(self):
+        """Check if last_checked_at exists, invoke ALTER TABLE if not."""
+        try:
+            cur = self.conn.execute("PRAGMA table_info(conversions)")
+            current_cols = {row[1] for row in cur.fetchall()}
+            if "last_checked_at" not in current_cols:
+                self.conn.execute("ALTER TABLE conversions ADD COLUMN last_checked_at INTEGER")
+        except Exception:
+            pass  # If table doesn't exist yet, it was just created by executescript above which has the col
 
     def close(self) -> None:
         if self.conn:
@@ -93,6 +108,14 @@ class PhotoDB:
             (src_hash, expected_dst),
         )
         return cur.fetchone() is not None
+
+    def update_last_checked(self, src_hash: str, expected_dst: str, ts: int) -> None:
+        """Update the last_checked_at timestamp for an existing successful conversion."""
+        self.conn.execute(
+            "UPDATE conversions SET last_checked_at=? WHERE src_hash=? AND dst_fullpath=? AND status='SUCCESS'",
+            (ts, src_hash, expected_dst)
+        )
+        self.conn.commit()
 
     def record(self, *, converted_at: int, status: str, src_name: str, src_ext: str,
                src_fullpath: str, dst_fullpath: str | None, src_hash: str | None,

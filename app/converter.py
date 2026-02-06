@@ -57,14 +57,9 @@ class Converter:
         # ALREADY_DONE
         if src_hash and db.already_done_here(src_hash, str(output_path)) and output_path.exists():
             end_ts = time.time()
-            dur = int(round(end_ts * 1000)) - start_ms
-            out_size = output_path.stat().st_size if output_path.exists() else None
-            self.log.info("#%d/%d %s: ALREADY_DONE (hash match and destination file exists)", idx, total, full_path.name)
-            self._log_db(db, end_ts=end_ts, status="ALREADY_DONE", filename=full_path.name, file_ext=file_ext,
-                         full_path=full_path, output_path=output_path, src_hash=src_hash,
-                         orig_w=None, orig_h=None, new_w=None, new_h=None, out_size=out_size,
-                         duration_ms=dur, im_args="(already converted here)", error=None,
-                         src_size=src_size, src_mtime=src_mtime)
+            self.log.info("#%d/%d %s: ALREADY_DONE (updating last_checked_at)", idx, total, full_path.name)
+            # Instead of inserting a new row, just update the timestamp on the existing one
+            db.update_last_checked(src_hash, str(output_path), int(end_ts))
             return int(time.time() - start_ts)
 
         # SKIPPED_DUP: reuse elsewhere

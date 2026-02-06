@@ -27,3 +27,4 @@ When analyzing or modifying this codebase, consider the following context which 
 ## Plan Storage
 - **Location**: `.ai/plans/`
 - **Convention**: Store implementation plans here before execution. Use the naming convention `YYYY-MM-DD-feature-name.md`.
+- **Requirement**: Every plan in planning mode MUST be saved into an actual file when approved.
