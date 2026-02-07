@@ -106,31 +106,47 @@ def get_stats(location: Optional[str] = None) -> Dict[str, Any]:
 
     return stats
 
-def get_history(limit: int = 50, location: Optional[str] = None, only_failures: bool = False) -> List[Dict[str, Any]]:
-    """Fetch recent conversion history with filtering."""
+def get_history(limit: int = 50, location: Optional[str] = None, only_failures: bool = False, page: int = 1, per_page: int = 25) -> List[Dict[str, Any]]:
+    """Fetch recent conversion history with filtering and pagination."""
     where_clauses = ["1=1"]
     params = []
 
     if location and location in LOCATIONS:
         folder_name = LOCATIONS[location]
-        where_clauses.append("src_fullpath LIKE ?")
+        # Use table alias 'c'
+        where_clauses.append("c.src_fullpath LIKE ?")
         params.append(f"%/{folder_name}/%")
 
     if only_failures:
-        where_clauses.append("status != 'SUCCESS' AND status != 'SKIPPED_DUP'")
+        where_clauses.append("c.status != 'SUCCESS' AND c.status != 'SKIPPED_DUP' AND c.status != 'ALREADY_DONE'")
 
     where_sql = " AND ".join(where_clauses)
+    
+    # Calculate offset for pagination
+    offset = (page - 1) * per_page
 
+    # Join with a subquery of unique successful conversions to get dimensions for duplicates
     query = f"""
-    SELECT converted_at, src_name, orig_width, orig_height, new_width, new_height, 
-           status, saved_mb, duration_ms, error, src_fullpath, dst_fullpath,
-           src_size, out_size_bytes
-    FROM conversions 
+    SELECT 
+        c.converted_at, c.src_name, 
+        COALESCE(c.orig_width, s.orig_width) as orig_width,
+        COALESCE(c.orig_height, s.orig_height) as orig_height,
+        COALESCE(c.new_width, s.new_width) as new_width,
+        COALESCE(c.new_height, s.new_height) as new_height,
+        c.status, c.saved_mb, c.duration_ms, c.error, c.src_fullpath, c.dst_fullpath,
+        c.src_size, c.out_size_bytes, s.src_fullpath as copied_from
+    FROM conversions c
+    LEFT JOIN (
+        SELECT src_hash, orig_width, orig_height, new_width, new_height, src_fullpath
+        FROM conversions
+        WHERE status = 'SUCCESS'
+        GROUP BY src_hash
+    ) s ON c.src_hash = s.src_hash
     WHERE {where_sql}
-    ORDER BY converted_at DESC 
-    LIMIT ?
+    ORDER BY c.converted_at DESC 
+    LIMIT ? OFFSET ?
     """
-    params.append(limit)
+    params.extend([per_page, offset])
 
     history = []
     with PhotoDB(DB_PATH, read_only=True) as db:
@@ -154,9 +170,34 @@ def get_history(limit: int = 50, location: Optional[str] = None, only_failures: 
                 "src_fullpath": row[10],
                 "dst_fullpath": row[11],
                 "src_size_bytes": row[12],
-                "out_size_bytes": row[13]
+                "out_size_bytes": row[13],
+                "copied_from": row[14]
             })
     return history
+
+def get_history_count(location: Optional[str] = None, only_failures: bool = False) -> int:
+    """Get total count of history records for pagination."""
+    where_clauses = ["1=1"]
+    params = []
+
+    if location and location in LOCATIONS:
+        folder_name = LOCATIONS[location]
+        where_clauses.append("src_fullpath LIKE ?")
+        params.append(f"%/{folder_name}/%")
+
+    if only_failures:
+        where_clauses.append("status != 'SUCCESS' AND status != 'SKIPPED_DUP' AND status != 'ALREADY_DONE'")
+
+    where_sql = " AND ".join(where_clauses)
+
+    query = f"SELECT COUNT(*) FROM conversions WHERE {where_sql}"
+    
+    with PhotoDB(DB_PATH, read_only=True) as db:
+        if not db.conn:
+            return 0
+        cur = db.conn.execute(query, params)
+        row = cur.fetchone()
+        return row[0] if row else 0
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
@@ -166,18 +207,29 @@ async def read_root(request: Request):
     })
 
 @app.get("/api/data")
-async def api_data(loc: str = None, failures: bool = False):
+async def api_data(loc: str = None, failures: bool = False, page: int = 1, per_page: int = 25):
     """
     API Query Params:
     - loc: Location slug (e.g., 'home')
     - failures: 'true' to show only failures/issues
+    - page: Page number (1-based)
+    - per_page: Items per page
     """
     # Convert 'null' or empty string to None
     location = loc if loc and loc != "null" else None
     
+    total_records = get_history_count(location=location, only_failures=failures)
+    total_pages = (total_records + per_page - 1) // per_page
+    
     return {
         "stats": get_stats(location=location),
-        "history": get_history(location=location, only_failures=failures)
+        "history": get_history(location=location, only_failures=failures, page=page, per_page=per_page),
+        "pagination": {
+            "current_page": page,
+            "per_page": per_page,
+            "total_records": total_records,
+            "total_pages": total_pages
+        }
     }
 
 @app.get("/api/image")

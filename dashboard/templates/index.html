@@ -187,6 +187,23 @@
                     </tbody>
                 </table>
             </div>
+            <!-- Pagination Controls -->
+            <div
+                class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex justify-between items-center text-sm">
+                <span id="pagination-info" class="text-gray-500 dark:text-gray-400"></span>
+                <div class="flex space-x-2">
+                    <button id="prev-page" onclick="changePage(-1)"
+                        class="px-3 py-1 rounded-md bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
+                        disabled>
+                        &lt;
+                    </button>
+                    <button id="next-page" onclick="changePage(1)"
+                        class="px-3 py-1 rounded-md bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
+                        disabled>
+                        &gt;
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -228,7 +245,9 @@
                 preview_size: "Size",
                 preview_duration: "Duration",
                 preview_click_expand: "Click row to preview image",
-                preview_loading: "Loading image..."
+                preview_loading: "Loading image...",
+                preview_copied_from: "Copied from",
+                pagination_info: "Showing {start}-{end} of {total}"
             },
             uk: {
                 title: "Фото Ресайзер",
@@ -264,14 +283,18 @@
                 preview_size: "Розмір",
                 preview_duration: "Тривалість",
                 preview_click_expand: "Клікніть для перегляду",
-                preview_loading: "Завантаження зображення..."
+                preview_loading: "Завантаження зображення...",
+                preview_copied_from: "Скопійовано з",
+                pagination_info: "Показано {start}-{end} з {total}"
             }
         };
 
         let currentLang = localStorage.getItem('photo_resizer_lang') || 'en';
         let currentTab = 'overview'; // overview, logs, or location_key
+        let currentPage = 1;
         let expandedRowId = null; // Track which row is expanded
         let expandedRowData = null; // Store expanded row data for re-expansion after refresh
+        let lastDataHash = null; // Track data changes to avoid unnecessary redraws
 
         function toggleLanguage() {
             currentLang = currentLang === 'en' ? 'uk' : 'en';
@@ -347,8 +370,9 @@
             return 'text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-900/30';
         }
 
-        function switchTab(tab) {
+        async function switchTab(tab) {
             currentTab = tab;
+            currentPage = 1; // Reset to first page on tab switch
 
             // Update UI
             document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -365,6 +389,8 @@
             updateTabTitle();
             updateDashboard();
         }
+
+        updateTabTitle();
 
         async function retryConversion(filePath, buttonEl) {
             // Disable button and show loading
@@ -423,6 +449,12 @@
                 return (bytes / 1024).toFixed(1) + ' KB';
             }
             return bytes + ' B';
+        }
+
+        function changePage(delta) {
+            currentPage += delta;
+            if (currentPage < 1) currentPage = 1;
+            updateDashboard();
         }
 
         function toggleRowExpand(rowData, rowElement) {
@@ -490,6 +522,12 @@
                                     <div class="font-mono text-xs text-gray-600 dark:text-gray-300 break-all mt-1">
                                         ${rowData.dst_fullpath || 'N/A'}
                                     </div>
+                                    ${rowData.copied_from ? `
+                                        <div class="mt-1 text-xs text-blue-500">
+                                            <span class="font-semibold">${i18n[currentLang].preview_copied_from}:</span> 
+                                            <span class="font-mono">${rowData.copied_from}</span>
+                                        </div>
+                                    ` : ''}
                                 </div>
                                 
                                 <!-- Dimensions -->
@@ -539,11 +577,11 @@
         async function updateDashboard() {
             try {
                 // Construct URL
-                let url = '/api/data?';
+                let url = '/api/data?page=' + currentPage;
                 if (currentTab === 'logs') {
-                    url += 'failures=true';
+                    url += '&failures=true';
                 } else if (currentTab !== 'overview') {
-                    url += 'loc=' + currentTab;
+                    url += '&loc=' + currentTab;
                 }
 
                 const response = await fetch(url);
@@ -556,7 +594,7 @@
                 document.getElementById('stat-ratio').innerHTML = `${data.stats.compression_ratio}<span class="text-lg">x</span>`;
 
                 // Check if history data has changed (to avoid unnecessary redraws)
-                const newDataHash = JSON.stringify(data.history);
+                const newDataHash = JSON.stringify(data.history) + JSON.stringify(data.pagination);
                 if (lastDataHash === newDataHash) {
                     // Data unchanged, skip table rebuild
                     document.getElementById('status-text').innerText = i18n[currentLang].status_live;
@@ -565,7 +603,7 @@
                 }
                 lastDataHash = newDataHash;
 
-                // Update History - only when data has changed
+                // Update History
                 const tbody = document.getElementById('history-body');
 
                 // Store expanded state before rebuild
@@ -637,6 +675,24 @@
                     });
                 }
 
+                // Update Pagination Controls
+                if (data.pagination) {
+                    const { current_page, per_page, total_records, total_pages } = data.pagination;
+
+                    const start = total_records === 0 ? 0 : (current_page - 1) * per_page + 1;
+                    const end = Math.min(current_page * per_page, total_records);
+
+                    const infoText = i18n[currentLang].pagination_info
+                        .replace('{start}', start)
+                        .replace('{end}', end)
+                        .replace('{total}', total_records);
+
+                    document.getElementById('pagination-info').innerText = infoText;
+
+                    document.getElementById('prev-page').disabled = current_page <= 1;
+                    document.getElementById('next-page').disabled = current_page >= total_pages;
+                }
+
                 // Status Indicator
                 document.getElementById('status-text').innerText = i18n[currentLang].status_live;
                 document.getElementById('connection-status').className = "flex items-center text-xs font-mono text-green-500";
@@ -648,8 +704,7 @@
             }
         }
 
-        // Track data changes to avoid unnecessary redraws
-        let lastDataHash = null;
+
 
         // Initial load
         updateDashboard();
