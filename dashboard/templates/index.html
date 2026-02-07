@@ -271,6 +271,7 @@
         let currentLang = localStorage.getItem('photo_resizer_lang') || 'en';
         let currentTab = 'overview'; // overview, logs, or location_key
         let expandedRowId = null; // Track which row is expanded
+        let expandedRowData = null; // Store expanded row data for re-expansion after refresh
 
         function toggleLanguage() {
             currentLang = currentLang === 'en' ? 'uk' : 'en';
@@ -443,6 +444,7 @@
             }
 
             expandedRowId = rowId;
+            expandedRowData = rowData; // Store for re-expansion after refresh
 
             // Prefer converted image (smaller), fallback to original
             const imagePath = rowData.dst_fullpath || rowData.src_fullpath;
@@ -611,6 +613,12 @@
                         });
 
                         tbody.appendChild(tr);
+
+                        // Re-expand row if it was expanded before refresh
+                        const currentRowId = row.timestamp + '-' + row.filename.replace(/[^a-zA-Z0-9]/g, '_');
+                        if (expandedRowId === currentRowId && expandedRowData) {
+                            toggleRowExpand(row, tr);
+                        }
                     });
                 }
 
