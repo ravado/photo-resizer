@@ -12,12 +12,13 @@ from app.database_operations import PhotoDB
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from pathlib import Path
 import sqlite3
 from typing import List, Dict, Any, Optional
+import mimetypes
 
-from app.config import DB_PATH, LOCATIONS
+from app.config import DB_PATH, LOCATIONS, BASE, EXTS
 from app.database_operations import PhotoDB
 
 app = FastAPI(title="Photo Resizer Dashboard", docs_url=None, redoc_url=None)
@@ -122,7 +123,8 @@ def get_history(limit: int = 50, location: Optional[str] = None, only_failures: 
 
     query = f"""
     SELECT converted_at, src_name, orig_width, orig_height, new_width, new_height, 
-           status, saved_mb, duration_ms, error, src_fullpath 
+           status, saved_mb, duration_ms, error, src_fullpath, dst_fullpath,
+           src_size, out_size_bytes
     FROM conversions 
     WHERE {where_sql}
     ORDER BY converted_at DESC 
@@ -141,11 +143,18 @@ def get_history(limit: int = 50, location: Optional[str] = None, only_failures: 
                 "filename": row[1],
                 "original_size": f"{row[2]}x{row[3]}" if row[2] else "?",
                 "new_size": f"{row[4]}x{row[5]}" if row[4] else "?",
+                "orig_width": row[2],
+                "orig_height": row[3],
+                "new_width": row[4],
+                "new_height": row[5],
                 "status": row[6],
                 "saved_mb": row[7] if row[7] else 0.0,
                 "duration_ms": row[8],
                 "error": row[9],
-                "src_fullpath": row[10]
+                "src_fullpath": row[10],
+                "dst_fullpath": row[11],
+                "src_size_bytes": row[12],
+                "out_size_bytes": row[13]
             })
     return history
 
@@ -170,6 +179,55 @@ async def api_data(loc: str = None, failures: bool = False):
         "stats": get_stats(location=location),
         "history": get_history(location=location, only_failures=failures)
     }
+
+@app.get("/api/image")
+async def serve_image(path: str):
+    """
+    Serve an image file securely.
+    Only serves files within the BASE directory with valid image extensions.
+    """
+    try:
+        file_path = Path(path).resolve()
+        
+        # Security: Ensure path is under BASE directory
+        try:
+            file_path.relative_to(BASE)
+        except ValueError:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Access denied: path outside allowed directory"}
+            )
+        
+        # Validate extension
+        if file_path.suffix.lower() not in EXTS:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Invalid file type: {file_path.suffix}"}
+            )
+        
+        # Check file exists
+        if not file_path.exists():
+            return JSONResponse(
+                status_code=404,
+                content={"error": "File not found"}
+            )
+        
+        # Determine MIME type
+        mime_type, _ = mimetypes.guess_type(str(file_path))
+        if not mime_type:
+            mime_type = "application/octet-stream"
+        
+        return FileResponse(
+            path=str(file_path),
+            media_type=mime_type,
+            filename=file_path.name
+        )
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
 
 @app.post("/api/retry")
 async def retry_conversion(request: Request):

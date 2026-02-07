@@ -221,7 +221,14 @@
                 retry_btn: "Retry",
                 retry_confirm: "Retrying conversion...",
                 retry_success: "Conversion successful!",
-                retry_failed: "Retry failed"
+                retry_failed: "Retry failed",
+                preview_original: "Original",
+                preview_converted: "Converted",
+                preview_dimensions: "Dimensions",
+                preview_size: "Size",
+                preview_duration: "Duration",
+                preview_click_expand: "Click row to preview image",
+                preview_loading: "Loading image..."
             },
             uk: {
                 title: "Фото Ресайзер",
@@ -250,12 +257,20 @@
                 retry_btn: "Повторити",
                 retry_confirm: "Повторна конвертація...",
                 retry_success: "Конвертація успішна!",
-                retry_failed: "Помилка повторної конвертації"
+                retry_failed: "Помилка повторної конвертації",
+                preview_original: "Оригінал",
+                preview_converted: "Конвертовано",
+                preview_dimensions: "Розміри",
+                preview_size: "Розмір",
+                preview_duration: "Тривалість",
+                preview_click_expand: "Клікніть для перегляду",
+                preview_loading: "Завантаження зображення..."
             }
         };
 
         let currentLang = localStorage.getItem('photo_resizer_lang') || 'en';
         let currentTab = 'overview'; // overview, logs, or location_key
+        let expandedRowId = null; // Track which row is expanded
 
         function toggleLanguage() {
             currentLang = currentLang === 'en' ? 'uk' : 'en';
@@ -399,6 +414,126 @@
             }
         }
 
+        function formatFileSize(bytes) {
+            if (!bytes) return '?';
+            if (bytes >= 1024 * 1024) {
+                return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+            } else if (bytes >= 1024) {
+                return (bytes / 1024).toFixed(1) + ' KB';
+            }
+            return bytes + ' B';
+        }
+
+        function toggleRowExpand(rowData, rowElement) {
+            const rowId = rowData.timestamp + '-' + rowData.filename.replace(/[^a-zA-Z0-9]/g, '_');
+            const existingDetail = document.getElementById('detail-' + rowId);
+
+            // Close any previously expanded row
+            const prevExpanded = document.querySelector('.detail-row');
+            if (prevExpanded && prevExpanded.id !== 'detail-' + rowId) {
+                prevExpanded.remove();
+                expandedRowId = null;
+            }
+
+            // Toggle current row
+            if (existingDetail) {
+                existingDetail.remove();
+                expandedRowId = null;
+                return;
+            }
+
+            expandedRowId = rowId;
+
+            // Prefer converted image (smaller), fallback to original
+            const imagePath = rowData.dst_fullpath || rowData.src_fullpath;
+            const imageUrl = imagePath ? `/api/image?path=${encodeURIComponent(imagePath)}` : null;
+
+            const detailRow = document.createElement('tr');
+            detailRow.id = 'detail-' + rowId;
+            detailRow.className = 'detail-row bg-gray-50 dark:bg-gray-800/50';
+
+            detailRow.innerHTML = `
+                <td colspan="5" class="px-6 py-4">
+                    <div class="flex flex-col md:flex-row gap-6">
+                        <!-- Image Preview -->
+                        <div class="flex-shrink-0">
+                            ${imageUrl ? `
+                                <img 
+                                    src="${imageUrl}" 
+                                    alt="${rowData.filename}"
+                                    class="max-w-[300px] max-h-[200px] rounded-lg shadow-md object-contain bg-gray-200 dark:bg-gray-700"
+                                    onerror="this.outerHTML='<div class=\\'flex items-center justify-center w-[300px] h-[150px] bg-gray-200 dark:bg-gray-700 rounded-lg text-gray-500\\'>Image not available</div>';"
+                                />
+                            ` : `
+                                <div class="flex items-center justify-center w-[300px] h-[150px] bg-gray-200 dark:bg-gray-700 rounded-lg text-gray-500">
+                                    No image available
+                                </div>
+                            `}
+                        </div>
+                        
+                        <!-- Details -->
+                        <div class="flex-grow space-y-3 text-sm">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <!-- Original Path -->
+                                <div>
+                                    <span class="text-gray-500 dark:text-gray-400 font-medium">${i18n[currentLang].preview_original}:</span>
+                                    <div class="font-mono text-xs text-gray-600 dark:text-gray-300 break-all mt-1">
+                                        ${rowData.src_fullpath || 'N/A'}
+                                    </div>
+                                </div>
+                                
+                                <!-- Converted Path -->
+                                <div>
+                                    <span class="text-gray-500 dark:text-gray-400 font-medium">${i18n[currentLang].preview_converted}:</span>
+                                    <div class="font-mono text-xs text-gray-600 dark:text-gray-300 break-all mt-1">
+                                        ${rowData.dst_fullpath || 'N/A'}
+                                    </div>
+                                </div>
+                                
+                                <!-- Dimensions -->
+                                <div>
+                                    <span class="text-gray-500 dark:text-gray-400 font-medium">${i18n[currentLang].preview_dimensions}:</span>
+                                    <div class="text-gray-600 dark:text-gray-300 mt-1">
+                                        ${rowData.orig_width || '?'}x${rowData.orig_height || '?'} → ${rowData.new_width || '?'}x${rowData.new_height || '?'}
+                                    </div>
+                                </div>
+                                
+                                <!-- File Sizes -->
+                                <div>
+                                    <span class="text-gray-500 dark:text-gray-400 font-medium">${i18n[currentLang].preview_size}:</span>
+                                    <div class="text-gray-600 dark:text-gray-300 mt-1">
+                                        ${formatFileSize(rowData.src_size_bytes)} → ${formatFileSize(rowData.out_size_bytes)}
+                                        ${rowData.saved_mb > 0 ? `<span class="text-green-500 ml-2">-${rowData.saved_mb} MB</span>` : ''}
+                                    </div>
+                                </div>
+                                
+                                <!-- Duration -->
+                                <div>
+                                    <span class="text-gray-500 dark:text-gray-400 font-medium">${i18n[currentLang].preview_duration}:</span>
+                                    <div class="text-gray-600 dark:text-gray-300 mt-1">
+                                        ${rowData.duration_ms ? rowData.duration_ms + 'ms' : 'N/A'}
+                                    </div>
+                                </div>
+                                
+                                ${rowData.error ? `
+                                <!-- Error -->
+                                <div class="md:col-span-2">
+                                    <span class="text-red-500 font-medium">Error:</span>
+                                    <div class="text-red-400 font-mono text-xs break-all mt-1">
+                                        ${rowData.error}
+                                    </div>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            `;
+
+            // Insert after current row
+            rowElement.insertAdjacentElement('afterend', detailRow);
+        }
+
         async function updateDashboard() {
             try {
                 // Construct URL
@@ -425,9 +560,10 @@
                 if (data.history.length === 0) {
                     tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-4 text-center text-gray-500">${i18n[currentLang].no_records}</td></tr>`;
                 } else {
-                    data.history.forEach(row => {
+                    data.history.forEach((row, index) => {
                         const tr = document.createElement('tr');
-                        tr.className = "hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors";
+                        tr.className = "hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer";
+                        tr.setAttribute('data-row-index', index);
 
                         const statusClass = getStatusColor(row.status);
 
@@ -466,6 +602,14 @@
                                 </div>
                             </td>
                         `;
+
+                        // Add click handler for row expansion
+                        tr.addEventListener('click', (e) => {
+                            // Don't expand if clicking on retry button
+                            if (e.target.closest('button')) return;
+                            toggleRowExpand(row, tr);
+                        });
+
                         tbody.appendChild(tr);
                     });
                 }
