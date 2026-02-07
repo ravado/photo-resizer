@@ -555,8 +555,23 @@
                 document.getElementById('stat-rate').innerText = data.stats.success_rate + '%';
                 document.getElementById('stat-ratio').innerHTML = `${data.stats.compression_ratio}<span class="text-lg">x</span>`;
 
-                // Update History
+                // Check if history data has changed (to avoid unnecessary redraws)
+                const newDataHash = JSON.stringify(data.history);
+                if (lastDataHash === newDataHash) {
+                    // Data unchanged, skip table rebuild
+                    document.getElementById('status-text').innerText = i18n[currentLang].status_live;
+                    document.getElementById('connection-status').className = "flex items-center text-xs font-mono text-green-500";
+                    return;
+                }
+                lastDataHash = newDataHash;
+
+                // Update History - only when data has changed
                 const tbody = document.getElementById('history-body');
+
+                // Store expanded state before rebuild
+                const wasExpandedId = expandedRowId;
+                const wasExpandedData = expandedRowData;
+
                 tbody.innerHTML = '';
 
                 if (data.history.length === 0) {
@@ -616,7 +631,7 @@
 
                         // Re-expand row if it was expanded before refresh
                         const currentRowId = row.timestamp + '-' + row.filename.replace(/[^a-zA-Z0-9]/g, '_');
-                        if (expandedRowId === currentRowId && expandedRowData) {
+                        if (wasExpandedId === currentRowId && wasExpandedData) {
                             toggleRowExpand(row, tr);
                         }
                     });
@@ -632,6 +647,9 @@
                 document.getElementById('connection-status').className = "flex items-center text-xs font-mono text-red-500";
             }
         }
+
+        // Track data changes to avoid unnecessary redraws
+        let lastDataHash = null;
 
         // Initial load
         updateDashboard();
