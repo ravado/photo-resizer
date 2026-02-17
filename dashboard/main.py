@@ -73,6 +73,9 @@ def get_stats(location: Optional[str] = None) -> Dict[str, Any]:
             total_src = row[2] or 0
             total_out = row[3] or 0
             
+            # Total converted size in MB
+            stats["total_out_size_mb"] = round(total_out / (1024 * 1024), 2) if total_out else 0.0
+            
             # Compression Ratio: e.g. 5.0 means original was 5x larger
             if total_out > 0:
                 stats["compression_ratio"] = round(total_src / total_out, 1)
